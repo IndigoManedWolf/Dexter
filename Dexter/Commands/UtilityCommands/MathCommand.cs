@@ -239,7 +239,6 @@ namespace Dexter.Commands {
 							Arr[0] = ProcessMath(Arg, Result, 1);
 							if (!MVFunctions[FuncName].Domain(Arr))
 								return Result.ThrowError($"Single argument for multiparameter function {FuncName} is invalid, found \"{Arg}\"");
-							Result.Echo($"Evaluating multivar function {FuncName} with a single parameter {Arr[0]}.", Arg);
 							return Factor * MVFunctions[FuncName].F(Arr);
 						}
 						return Result.ThrowError($"Invalid arguments for multiparametric function {FuncName}. Found \"{Arg}\".");
@@ -273,7 +272,7 @@ namespace Dexter.Commands {
 				if (Arg.ToLower().StartsWith(FuncName)) {
 					A = ProcessMath(Arg[FuncName.Length..], Result, 1);
 					if (!Functions[FuncName].Domain(A))
-						return Result.ThrowError($"Value {A} not included in the domain of function \"{FuncName}\"");
+						return Result.ThrowVerboseError($"Value {A} not included in the domain of function \"{FuncName}\"");
 					Result.Echo($"Evaluating {FuncName} of {A}.", Arg);
 					return Functions[FuncName].F(A);
 				}
@@ -295,12 +294,13 @@ namespace Dexter.Commands {
 				Result.Echo($"Parsed numerical value {d * Sign}.", (Sign == -1 ? "(-)" : "") + Arg);
 				return d * Sign;
 			} else {
-				return Result.ThrowError("Failed to parse string \"" + Arg + "\".");
+				return Result.ThrowVerboseError("Failed to parse string \"" + Arg + "\".");
 			}
 		}
 
 		internal class MathResult {
 			public bool ErrorFlag = false;
+			public bool VerboseFlag = false;
 			public double Result = 0;
 			public string Error = "";
 			public List<string> Verbose = new List<string>();
@@ -318,6 +318,13 @@ namespace Dexter.Commands {
 				return 1;
 			}
 
+			public double ThrowVerboseError(string Error) {
+				this.Error += '\n' + Error;
+				ErrorFlag = true;
+				VerboseFlag = true;
+				return 1;
+			}
+
 			public void Echo(string Message, string Stack) {
 				this.Verbose.Add(Message);
 				this.VerboseStack.Add(Stack);
@@ -325,6 +332,9 @@ namespace Dexter.Commands {
 
 			public override string ToString() {
 				string Str = "";
+				if (!VerboseFlag) {
+					return Str;
+                }
 				for (int i = 0; i < Verbose.Count && i < VerboseStack.Count; i++) {
 					Str += $" v: {Verbose[i]} with arg = {VerboseStack[i]}\n";
 				}
@@ -433,7 +443,7 @@ namespace Dexter.Commands {
 			for (int i = a; i > 1; i--) {
 				Value *= i;
 				if (double.IsInfinity(Value)) {
-					return Result.ThrowError("Overflow in factorial operation, result of local expression is infinity.");
+					return Result.ThrowVerboseError("Overflow in factorial operation, result of local expression is infinity.");
 				}
 			}
 
