@@ -121,18 +121,19 @@ namespace Dexter.Commands {
 
 			//parsing parentheses
 			int Start = 0;
+			Stack<int> Starts = new Stack<int>();
 			int Depth = 0;
 			while (Arg.Contains('(') || Arg.Contains(')')) {
 				for (int i = 0; i < Arg.Length; i++) {
-					if (Arg[i] == '(' && Depth++ == 0)
-						Start = i;
+					if (Arg[i] == '(')
+						Starts.Push(i*1);
 					else if (Arg[i] == ')') {
-						if (--Depth == 0) {
+						if (Starts.Count>0) {
 							//Simplify everything within the parentheses
-							Arg = Simplify(Arg, Arg[(Start + 1)..i], Start, i, Result);
+							Arg = Simplify(Arg, Arg[(Starts.Peek() + 1)..i], Starts.Pop(), i, Result);
 							//Console.WriteLine("New simplified arg = " + arg);
 							break;
-						} else if (Depth < 0) {
+						} else {
 							return Result.ThrowError("Unbalanced or unexpected closing parenthesis found.");
 						}
 					}
