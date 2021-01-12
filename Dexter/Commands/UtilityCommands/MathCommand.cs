@@ -53,6 +53,7 @@ namespace Dexter.Commands {
 			{"phi", 1.618033988749},
 			{"G", 6.67408e-11},
 			{"pi", Math.PI},
+			{"tau", 2*Math.PI},
 			{"mu0", 1.2566370621219e-6},
 			{"k", 8.9875517923e9},
 			{"e", Math.E},
