@@ -164,14 +164,14 @@ namespace Dexter.Commands {
 
 			//parsing multiplication/division
 			for (int i = Arg.Length - 1; i >= 0; i--) {
-				if (Arg[i] is '*' or '/') {
+				if (Arg[i] is '*' or '×' or '/' or '÷') {
 					A = ProcessMath(Arg[0..i], Result, 1);
 					B = ProcessMath(Arg[(i + 1)..], Result, 1);
 
-					if (Arg[i] is '/' && B == 0) {
+					if (Arg[i] is '/' or '÷' && B == 0) {
 						return Result.ThrowError("Attempt to divide by zero");
 					}
-					if (Arg[i] == '*') {
+					if (Arg[i] is '*' or '×') {
 						Result.Echo("Multiplied " + A + " * " + B, Arg);
 						return A * B;
 					} else {
