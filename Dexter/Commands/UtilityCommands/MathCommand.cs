@@ -167,8 +167,9 @@ namespace Dexter.Commands {
 					A = ProcessMath(Arg[0..i], Result, 1);
 					B = ProcessMath(Arg[(i + 1)..], Result, 1);
 
-					if (B == 0)
+					if (Arg[i] is '/' && B == 0) {
 						return Result.ThrowError("Attempt to divide by zero");
+					}
 					if (Arg[i] == '*') {
 						Result.Echo("Multiplied " + A + " * " + B, Arg);
 						return A * B;
