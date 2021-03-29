@@ -5,7 +5,6 @@ using Dexter.Enums;
 using Dexter.Extensions;
 using Discord.Commands;
 using Newtonsoft.Json;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -23,7 +22,7 @@ namespace Dexter.Commands {
         /// <param name="AliasActionType">The AliasActionType specifies whether the action is to add or remove the alias from the command.</param>
         /// <param name="CommandName">The CommandName specifies the command that you want the alias to be applied to.</param>
         /// <param name="Alias">The Alias is the string of the alias that you wish to be applied to the command.</param>
-        /// <returns>A task object, from which we can await until this method completes successfully.</returns>
+        /// <returns>A <c>Task</c> object, which can be awaited until this method completes successfully.</returns>
 
         [Command("ccalias")]
         [Summary("Modifies a custom commands aliases.\n" +
@@ -39,14 +38,24 @@ namespace Dexter.Commands {
 
             switch (AliasActionType) {
                 case AliasActionType.Add:
-                    if (string.IsNullOrEmpty(Alias))
-                        throw new Exception("Alias is not given! Please enter an alias with this command.");
+                    if (string.IsNullOrEmpty(Alias)) {
+                        await BuildEmbed(EmojiEnum.Annoyed)
+                            .WithTitle("Error Adding Alias.")
+                            .WithDescription("Alias is not given! Please enter an alias with this command.")
+                            .SendEmbed(Context.Channel);
+                        return;
+                    }
 
                     CustomCommand Add = CustomCommandDB.GetCommandByNameOrAlias(Alias);
 
-                    if (Add != null)
-                        throw new InvalidOperationException($"The command `{BotConfiguration.Prefix}{Add.CommandName}` " +
-                            $"already has the alias `{BotConfiguration.Prefix}{Alias}`!");
+                    if (Add != null) {
+                        await BuildEmbed(EmojiEnum.Annoyed)
+                            .WithTitle("Error Adding Alias.")
+                            .WithDescription($"The command `{BotConfiguration.Prefix}{Add.CommandName}` " +
+                            $"already has the alias `{BotConfiguration.Prefix}{Alias}`!")
+                            .SendEmbed(Context.Channel);
+                        return;
+                    }
 
                     await SendForAdminApproval(AddAliasCallback,
                         new Dictionary<string, string>() {
@@ -62,13 +71,23 @@ namespace Dexter.Commands {
                         .SendEmbed(Context.Channel);
                     break;
                 case AliasActionType.Remove:
-                    if (string.IsNullOrEmpty(Alias))
-                        throw new Exception("Alias is not given! Please enter an alias with this command.");
+                    if (string.IsNullOrEmpty(Alias)) {
+                        await BuildEmbed(EmojiEnum.Annoyed)
+                            .WithTitle("Error Removing Alias.")
+                            .WithDescription("Alias is not given! Please enter an alias with this command.")
+                            .SendEmbed(Context.Channel);
+                        return;
+                    }
 
                     CustomCommand Remove = CustomCommandDB.GetCommandByNameOrAlias(Alias);
 
-                    if (Remove == null)
-                        throw new InvalidOperationException($"No command with alias of `{BotConfiguration.Prefix}{Alias}` exists! Are you sure you spelt it correctly?");
+                    if (Remove == null) {
+                        await BuildEmbed(EmojiEnum.Annoyed)
+                            .WithTitle("Error Removing Alias.")
+                            .WithDescription($"No command with alias of `{BotConfiguration.Prefix}{Alias}` exists! Are you sure you spelt it correctly?")
+                            .SendEmbed(Context.Channel);
+                        return;
+                    }
 
                     await SendForAdminApproval(AddAliasCallback,
                         new Dictionary<string, string>() {
@@ -86,8 +105,14 @@ namespace Dexter.Commands {
                 case AliasActionType.List:
                     CustomCommand List = CustomCommandDB.GetCommandByNameOrAlias(CommandName);
 
-                    if (List == null)
-                        throw new InvalidOperationException($"The command `{BotConfiguration.Prefix}{CommandName}` doesn't exist!");
+                    if (List == null) {
+                        await BuildEmbed(EmojiEnum.Annoyed)
+                            .WithTitle("Error Listing Alias.")
+                            .WithDescription($"The command `{BotConfiguration.Prefix}{CommandName}` doesn't exist!")
+                            .SendEmbed(Context.Channel);
+                        return;
+
+                    }
 
                     List<string> AliasList = JsonConvert.DeserializeObject<List<string>>(List.Alias);
 
@@ -99,7 +124,11 @@ namespace Dexter.Commands {
                         .SendEmbed(Context.Channel);
                     break;
                 default:
-                    throw new ArgumentOutOfRangeException(AliasActionType.ToString());
+                    await BuildEmbed(EmojiEnum.Annoyed)
+                        .WithTitle("Unable To Modify Alias.")
+                        .WithDescription($"The {AliasActionType} does not exist as an option!")
+                        .SendEmbed(Context.Channel);
+                    break;
             }
         }
 
@@ -109,7 +138,7 @@ namespace Dexter.Commands {
         /// <param name="Parameters">The called back parameters:
         ///     CommandName = The name of the command you wish to add the alias to.
         ///     Alias = The alias you wish to add to the command.</param>
-        /// <returns>A task object, from which we can await until this method completes successfully.</returns>
+        /// <returns>A <c>Task</c> object, which can be awaited until this method completes successfully.</returns>
 
         public void AddAliasCallback(Dictionary<string, string> Parameters) {
             string CommandName = Parameters["CommandName"];
@@ -135,7 +164,7 @@ namespace Dexter.Commands {
         /// <param name="Parameters">The called back parameters:
         ///     CommandName = The name of the command you wish to remove the alias from.
         ///     Alias = The alias you wish to remove from the command.</param>
-        /// <returns>A task object, from which we can await until this method completes successfully.</returns>
+        /// <returns>A <c>Task</c> object, which can be awaited until this method completes successfully.</returns>
 
         public void RemoveAliasCallback(Dictionary<string, string> Parameters) {
             string CommandName = Parameters["CommandName"];
