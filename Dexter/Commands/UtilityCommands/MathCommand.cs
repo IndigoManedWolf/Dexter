@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Drawing.Printing;
 using System.Linq;
 using System.Threading.Tasks;
 using Dexter.Attributes.Methods;
 using Dexter.Enums;
 using Dexter.Extensions;
 using Discord.Commands;
+using Humanizer;
 
 namespace Dexter.Commands {
 	public partial class UtilityCommands {
@@ -54,7 +57,7 @@ namespace Dexter.Commands {
 
 
 			public Function(double F, Func<double[], bool> Domain) {
-				this.F = d => F;
+				this.F = d => d.Length>0 ? F*d[0] : F;
 				this.Domain = Domain;
 			}
 
@@ -70,7 +73,7 @@ namespace Dexter.Commands {
 
 			public Function(double F){
 				this.F = d => F;
-				this.Domain = p;
+				this.Domain = d => (d.Length == 0 || d.Length == 1);
 			}
 
 			public Function(Func<double, double> F){
@@ -93,7 +96,7 @@ namespace Dexter.Commands {
 			{"G", new Function(6.67408e-11)},
 			{"pi", new Function(Math.PI)},
 			{"tau", new Function(2*Math.PI)},
-			{"mu0", new Function(1.2566370621219e-60)},
+			{"mu", new Function(1.2566370621219e-60)},
 			{"k", new Function(8.9875517923e9)},
 			{"e", new Function(Math.E)},
 			{"c", new Function(299792458.0)},
@@ -125,16 +128,23 @@ namespace Dexter.Commands {
 
 		private static bool MVLogCheck(double[] d) { return d.Length == 2 && d[0] > 0 && d[1] > 0; }
 
-		private string[] Order = new string[] {"Separator","Addition","Multiplication","Exponentiation","Parentheses"};
+		private string[] Order = new string[] {"None", "Separator","Addition","Multiplication"};
+
+		private static readonly Dictionary<string, string> SymbolOrder = new Dictionary<string, string>() {
+			{"+", "Addition"},
+			{"-", "Addition"}
+		};
 		private static double ProcessMath(string Arg, MathResult Result, double NeutralValue = 1) {
+			Arg = " " + Arg;
 			bool GroupingFlag = false;
 			bool NumFlag = false;
 			int Depth = 0;
 			int LaggingIndex = Arg.Length;
-			string LastOperation = "Separator";
+			string LastOperation = "None";
 			if (Arg == "")
 				return NeutralValue;
 			Stack<(string, double[])> EvalStack = new Stack<(string, double[])>();
+			Stack<string> OrderStack = new Stack<string>();
 			for (int Index = Arg.Length - 1; Index >= 0; Index -= GroupingFlag ? 0 : 1) {
 
 				if (GroupingFlag) {
@@ -143,7 +153,21 @@ namespace Dexter.Commands {
 					continue;
 				}
 
-				if (Char.IsDigit(Arg[Index]) || Arg[Index] is '.') {
+				if (Arg[Index] is '-')
+				{
+					(string, double[]) lastVal = EvalStack.Pop();
+					if ("E^+-*/×÷".Contains(Arg[Index-1])) {
+						if (lastVal.Item1 == "number" || lastVal.Item1 == "group")
+						{
+							EvalStack.Push(("number", lastVal.Item2.Select(x => -x).ToArray()));
+						}
+					}
+				}
+
+				if (Char.IsDigit(Arg[Index]) || (Arg[Index] is '.' && NumFlag)) {
+					if (!NumFlag) {
+						LaggingIndex = Index;
+					}
 					NumFlag = true;
 					continue;
 				}
@@ -152,11 +176,14 @@ namespace Dexter.Commands {
 				//	return 1;
 				if (NumFlag) {
 					// Todo: add error handling for multiple decimal points
-					EvalStack.Push(("number", new double[] {Double.Parse(Arg[Index..LaggingIndex])} ));
+					EvalStack.Push(("number", new double[] {Double.Parse(Arg[(Index+1)..(LaggingIndex+1)])} ));
+					NumFlag = false;
 				}
 
 				if (Arg[Index] is ')') {
 					EvalStack.Push(("parentheses", new double[0]));
+					OrderStack.Push(LastOperation);
+					LastOperation = "None";
                     Depth++;
 				}
 
@@ -171,30 +198,35 @@ namespace Dexter.Commands {
 					Depth--;
 					if (Depth < 0) {
 						// Todo: add error for too few parens
+						// cancel that, just accept it, we also need handling for if there weren't enough open parens to close it so that it gives a solid answer
+						// basically pretend like everything's fine
+						Depth = 0;
+						LastOperation = "None";
+					} else {
+						LastOperation = OrderStack.Pop();
 					}
 					EvalStack.Push(("group", new double[0]));
+					// make sure that if this group is followed by an exponentiation but not preceded by a function, the exponentiation happens immediately 
                 }
 
-				if (Arg[Index] is '-') {
-
-                }
-
-				if (Arg[Index] is 'E') {
+				if (Arg[Index] is 'E' && Index > 0 && !Char.IsLetter(Arg[Index-1])) {
 					(string, double[]) exponent = EvalStack.Pop();
 					if (exponent.Item1 == "group") {
 						if (exponent.Item2.Length == 1) {
-							EvalStack.Push(("number", new double[] { exponent.Item2[0]}));
+							EvalStack.Push(("number", new double[] { Math.Pow(10, exponent.Item2[0])}));
 						}
 						else {
 							// Todo: add way to show what part of the equation went wrong. Keeping track of indices now seems important.
 							// Index currently storing position of the E
-							Result.ThrowError("Too many arguments for E notation! Tried using `" + exponent.Item2);
+							Result.ThrowError("Too many arguments for E notation! Tried using `" + exponent.Item2 + "`");
 						}
 					}
+					continue;
 				}
 
 				// maybe add some code that just evaluates left to right? and call it
 				// when needed?
+				// ye i'm doing that check below
 
 
 				LaggingIndex = Index;
@@ -203,139 +235,162 @@ namespace Dexter.Commands {
 				// Some chemistry ones?
 				// Some physics?
 
-				//parsing parentheses
-				int Start = 0;
-				Stack<int> Starts = new Stack<int>();
+				// Process named expressions
+				if (Char.IsLetter(Arg[Index])) {
+					string FuncName = Symbols.Keys.Where(x => Arg[0..(Index + 1)].EndsWith(x)).Aggregate("", (max, cur) => max.Length > cur.Length ? max : cur);
+					Function ThisFunc;
+					if (!Symbols.TryGetValue(FuncName, out ThisFunc))
+						return Result.ThrowError("Tried and failed to find function or constant name at end of " + Arg[0..(Index + 1)]);
+					(string, double[]) operand;
+					if (!EvalStack.TryPop(out operand)) {
+						operand = ("group", new double[0]);
+					} else if (operand.Item1 == "number") {
+						operand = ("group", operand.Item2);
+					} else if (operand.Item1 != "group") {
+						EvalStack.Push(operand);
+						operand = ("group", new double[0]);
+					}
+					if (!ThisFunc.Domain(operand.Item2)) {
+						return Result.ThrowError("Wrong number of arguments; tried to use " + FuncName + " on " + string.Join(", ", operand.Item2));
+					}
+					EvalStack.Push(("number", new double[] { ThisFunc.F(operand.Item2) }));
+					Index = Index - FuncName.Length;
+				}
+
+
+				////parsing parentheses
+				//int Start = 0;
+				//Stack<int> Starts = new Stack<int>();
 				
-				while (Arg.Contains('(') || Arg.Contains(')'))
-				{
-					for (int i = 0; i < Arg.Length; i++)
-					{
-						if (Arg[i] == '(')
-							Starts.Push(i * 1);
-						else if (Arg[i] == ')')
-						{
-							if (Starts.Count > 0)
-							{
-								//Simplify everything within the parentheses
-								Arg = Simplify(Arg, Arg[(Starts.Peek() + 1)..i], Starts.Pop(), i, Result);
-								//Console.WriteLine("New simplified arg = " + arg);
-								break;
-							}
-							else
-							{
-								return Result.ThrowError("Unbalanced or unexpected closing parenthesis found.");
-							}
-						}
-					}
-				}
-				if (Depth > 0)
-					return Result.ThrowError("Unbalanced or unexpected opening parenthesis found.");
+				//while (Arg.Contains('(') || Arg.Contains(')'))
+				//{
+				//	for (int i = 0; i < Arg.Length; i++)
+				//	{
+				//		if (Arg[i] == '(')
+				//			Starts.Push(i * 1);
+				//		else if (Arg[i] == ')')
+				//		{
+				//			if (Starts.Count > 0)
+				//			{
+				//				//Simplify everything within the parentheses
+				//				Arg = Simplify(Arg, Arg[(Starts.Peek() + 1)..i], Starts.Pop(), i, Result);
+				//				//Console.WriteLine("New simplified arg = " + arg);
+				//				break;
+				//			}
+				//			else
+				//			{
+				//				return Result.ThrowError("Unbalanced or unexpected closing parenthesis found.");
+				//			}
+				//		}
+				//	}
+				//}
+				//if (Depth > 0)
+				//	return Result.ThrowError("Unbalanced or unexpected opening parenthesis found.");
 
-				double A;
-				double B;
+				//double A;
+				//double B;
 
-				//parsing addition/subtraction
-				for (int i = Arg.Length - 1; i >= 0; i--)
-				{
-					if (Arg[i] is '+' or '-')
-					{
-						if (i > 0 && Arg[i - 1] == 'E')
-							continue; //if the + or - is part of an order of magnitude expression, pass.
-						A = ProcessMath(Arg[0..i], Result, 0);
-						B = ProcessMath(Arg[(i + 1)..], Result, 0);
+				////parsing addition/subtraction
+				//for (int i = Arg.Length - 1; i >= 0; i--)
+				//{
+				//	if (Arg[i] is '+' or '-')
+				//	{
+				//		if (i > 0 && Arg[i - 1] == 'E')
+				//			continue; //if the + or - is part of an order of magnitude expression, pass.
+				//		A = ProcessMath(Arg[0..i], Result, 0);
+				//		B = ProcessMath(Arg[(i + 1)..], Result, 0);
 
-						if (Arg[i] == '+')
-						{
-							Result.Echo("Added " + A + " + " + B + ".", Arg);
-							return A + B;
-						}
-						else
-						{
-							Result.Echo("Subtracted " + A + " - " + B + ".", Arg);
-							return A - B;
-						}
-					}
-				}
+				//		if (Arg[i] == '+')
+				//		{
+				//			Result.Echo("Added " + A + " + " + B + ".", Arg);
+				//			return A + B;
+				//		}
+				//		else
+				//		{
+				//			Result.Echo("Subtracted " + A + " - " + B + ".", Arg);
+				//			return A - B;
+				//		}
+				//	}
+				//}
 
-				//parsing multiplication/division
-				for (int i = Arg.Length - 1; i >= 0; i--)
-				{
-					if (Arg[i] is '*' or '×' or '/' or '÷')
-					{
-						A = ProcessMath(Arg[0..i], Result, 1);
-						B = ProcessMath(Arg[(i + 1)..], Result, 1);
+				////parsing multiplication/division
+				//for (int i = Arg.Length - 1; i >= 0; i--)
+				//{
+				//	if (Arg[i] is '*' or '×' or '/' or '÷')
+				//	{
+				//		A = ProcessMath(Arg[0..i], Result, 1);
+				//		B = ProcessMath(Arg[(i + 1)..], Result, 1);
 
-						if (Arg[i] is '/' or '÷' && B == 0)
-						{
-							return Result.ThrowError("Attempt to divide by zero");
-						}
-						if (Arg[i] is '*' or '×')
-						{
-							Result.Echo("Multiplied " + A + " * " + B, Arg);
-							return A * B;
-						}
-						else
-						{
-							Result.Echo("Divided " + A + " / " + B, Arg);
-							return A / B;
-						}
-					}
-				}
+				//		if (Arg[i] is '/' or '÷' && B == 0)
+				//		{
+				//			return Result.ThrowError("Attempt to divide by zero");
+				//		}
+				//		if (Arg[i] is '*' or '×')
+				//		{
+				//			Result.Echo("Multiplied " + A + " * " + B, Arg);
+				//			return A * B;
+				//		}
+				//		else
+				//		{
+				//			Result.Echo("Divided " + A + " / " + B, Arg);
+				//			return A / B;
+				//		}
+				//	}
+				//}
 
-				//parsing powers
-				for (int i = Arg.Length - 1; i >= 0; i--)
-				{
-					if (Arg[i] == '^')
-					{
-						A = ProcessMath(Arg[0..i], Result, 1);
-						B = ProcessMath(Arg[(i + 1)..], Result, 1);
+				////parsing powers
+				//for (int i = Arg.Length - 1; i >= 0; i--)
+				//{
+				//	if (Arg[i] == '^')
+				//	{
+				//		A = ProcessMath(Arg[0..i], Result, 1);
+				//		B = ProcessMath(Arg[(i + 1)..], Result, 1);
 
-						if (A == 0 && B == 0)
-							return Result.ThrowError("Attempt to evaluate zero to the power of zero.");
+				//		if (A == 0 && B == 0)
+				//			return Result.ThrowError("Attempt to evaluate zero to the power of zero.");
 
-						Result.Echo("Evaluated " + A + " ^ " + B, Arg);
-						return Math.Pow(A, B);
-					}
-				}
+				//		Result.Echo("Evaluated " + A + " ^ " + B, Arg);
+				//		return Math.Pow(A, B);
+				//	}
+				//}
 
-				//parsing the random operator and the remainder operator
-				for (int i = Arg.Length - 1; i >= 0; i--)
-				{
-					if (Arg[i] is 'd' or 'D' or '%')
-					{
-						A = ProcessMath(Arg[0..i], Result, 1);
-						B = ProcessMath(Arg[(i + 1)..], Result, 1);
+				////parsing the random operator and the remainder operator
+				//for (int i = Arg.Length - 1; i >= 0; i--)
+				//{
+				//	if (Arg[i] is 'd' or 'D' or '%')
+				//	{
+				//		A = ProcessMath(Arg[0..i], Result, 1);
+				//		B = ProcessMath(Arg[(i + 1)..], Result, 1);
 
-						if (Arg[i] == 'd') { return Roll(A, B, Result); }
-						if (Arg[i] == 'D') { return Roll(A, B, Result, true); }
-						return A % B;
-					}
-				}
+				//		if (Arg[i] == 'd') { return Roll(A, B, Result); }
+				//		if (Arg[i] == 'D') { return Roll(A, B, Result, true); }
+				//		return A % B;
+				//	}
+				//}
 
-				//parsing factorials
-				if (Arg[^1] == '!')
-				{
-					return Factorial(ProcessMath(Arg[0..^1], Result), Result);
-				}
+				////parsing factorials
+				//if (Arg[^1] == '!')
+				//{
+				//	return Factorial(ProcessMath(Arg[0..^1], Result), Result);
+				//}
 
-				string FuncComp = Arg;
-				string FuncNum = "";
-				double Factor = 1;
-				for (int i = 0; i < Arg.Length; i++)
-				{
-					if (!Char.IsDigit(Arg[i]))
-					{
-						FuncNum = Arg[0..i];
-						FuncComp = Arg[i..].ToLower();
-						break;
-					}
-				}
-				if (FuncNum.Length > 0 && FuncComp.Length > 0)
-				{
-					Result.Echo($"Parsing function multiplicand \"{FuncNum}\"", Arg);
-					Factor = ProcessMath(FuncNum, Result, 1);
-				}
+				//string FuncComp = Arg;
+				//string FuncNum = "";
+				//double Factor = 1;
+				//for (int i = 0; i < Arg.Length; i++)
+				//{
+				//	if (!Char.IsDigit(Arg[i]))
+				//	{
+				//		FuncNum = Arg[0..i];
+				//		FuncComp = Arg[i..].ToLower();
+				//		break;
+				//	}
+				//}
+				//if (FuncNum.Length > 0 && FuncComp.Length > 0)
+				//{
+				//	Result.Echo($"Parsing function multiplicand \"{FuncNum}\"", Arg);
+				//	Factor = ProcessMath(FuncNum, Result, 1);
+				//}
 
 				////parsing multivar functions
 				//foreach (string FuncName in MVFunctions.Keys)
@@ -420,9 +475,20 @@ namespace Dexter.Commands {
 				//	return Result.ThrowVerboseError("Failed to parse string \"" + Arg + "\".");
 				//}
 			}
+
+			// begin final processing
+			// example, if the first token is a number, then the preceeding algorithm would not have yet added it to the stack
+			// other example, if there were unmatched ))) at the end, resolve now
 			if (Result.ErrorFlag)
 				return 1;
-			return Double.Parse(Arg);
+			Result.ThrowVerboseError(string.Join(",", EvalStack.ToArray().Select(x => x.Item1.ToString() + " [" + string.Join(",", x.Item2.Select(x => x.ToString()).ToArray()) + "]").ToArray()));
+			Result.ThrowVerboseError(EvalStack.Humanize());
+			return -1;//Double.Parse(Arg);
+		}
+
+		private static double Result(Stack<(string, double[])> EvalStack, MathResult Result) {
+			//This function should be able to evaluate left to right until it hits a block
+			return 1;
 		}
 
 		internal class MathResult {
